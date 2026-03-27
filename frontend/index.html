@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TerraSense</title>
+    <meta name="description" content="TerraSense — Real-time NIR spectroscopy soil mineral analysis dashboard." />
+
+    <!-- Chart.js (only external dependency allowed in JS) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+
+  <body>
+    <div class="app">
+      <!-- 1. Navbar -->
+      <header class="navbar" role="banner">
+        <div class="navbar__inner">
+          <div class="navbar__brand">
+            <div class="navbar__title">TerraSense</div>
+            <div class="navbar__subtitle">Soil Intelligence Platform</div>
+          </div>
+
+          <div class="navbar__right">
+            <div class="status" aria-live="polite">
+              <span id="statusDot" class="status__dot" aria-hidden="true"></span>
+              <span id="statusText" class="status__text">Checking...</span>
+            </div>
+            <a class="navlink" href="#">Docs</a>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <!-- 2. Page Hero -->
+        <section class="section hero">
+          <div class="container">
+            <h1 class="hero__title">Real-Time Soil Mineral Analysis</h1>
+            <p class="hero__subtitle">
+              Upload a spectral scan and get instant AI-powered predictions for Nitrogen, Phosphorus, Potassium, and Organic Carbon.
+            </p>
+          </div>
+        </section>
+
+        <!-- 3. Metric Cards Row -->
+        <section class="section">
+          <div class="container">
+            <div class="metrics" aria-label="Nutrient metrics">
+              <article class="metric" id="cardN">
+                <div class="metric__top">
+                  <div class="metric__label">Nitrogen</div>
+                  <div class="badge badge--hidden" id="badgeN" aria-hidden="true"></div>
+                </div>
+                <div class="metric__value" id="valueN">—</div>
+                <div class="metric__unit">% of dry weight</div>
+                <div class="metric__divider"></div>
+                <div class="metric__desc">Primary driver of leaf and stem growth</div>
+                <div class="metric__trend trend--hidden" id="trendN" aria-hidden="true"></div>
+              </article>
+
+              <article class="metric" id="cardP">
+                <div class="metric__top">
+                  <div class="metric__label">Phosphorus</div>
+                  <div class="badge badge--hidden" id="badgeP" aria-hidden="true"></div>
+                </div>
+                <div class="metric__value" id="valueP">—</div>
+                <div class="metric__unit">mg/kg</div>
+                <div class="metric__divider"></div>
+                <div class="metric__desc">Essential for root development and flowering</div>
+                <div class="metric__trend trend--hidden" id="trendP" aria-hidden="true"></div>
+              </article>
+
+              <article class="metric" id="cardK">
+                <div class="metric__top">
+                  <div class="metric__label">Potassium</div>
+                  <div class="badge badge--hidden" id="badgeK" aria-hidden="true"></div>
+                </div>
+                <div class="metric__value" id="valueK">—</div>
+                <div class="metric__unit">mg/kg</div>
+                <div class="metric__divider"></div>
+                <div class="metric__desc">Regulates water uptake and disease resistance</div>
+                <div class="metric__trend trend--hidden" id="trendK" aria-hidden="true"></div>
+              </article>
+
+              <article class="metric" id="cardOC">
+                <div class="metric__top">
+                  <div class="metric__label">Organic Carbon</div>
+                  <div class="badge badge--hidden" id="badgeOC" aria-hidden="true"></div>
+                </div>
+                <div class="metric__value" id="valueOC">—</div>
+                <div class="metric__unit">% organic matter</div>
+                <div class="metric__divider"></div>
+                <div class="metric__desc">Indicator of overall soil biological health</div>
+                <div class="metric__trend trend--hidden" id="trendOC" aria-hidden="true"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Scan Panel + Stats Row -->
+        <section class="section">
+          <div class="container">
+            <div class="scan-grid">
+              <!-- Left: Scan Console -->
+              <section class="card card--dark scan" aria-label="Scan console">
+                <div class="scan__header">
+                  <div class="scan__kicker">Scan Console</div>
+                  <div class="scan__count" id="scanCountText">Scans completed: 0</div>
+                </div>
+
+                <div class="scan__center">
+                  <div class="rings" id="rings">
+                    <div class="rings__ring rings__ring--a"></div>
+                    <div class="rings__ring rings__ring--b"></div>
+                    <div class="rings__ring rings__ring--c"></div>
+                    <button class="btn btn--primary" id="scanBtn" type="button">Initiate Scan</button>
+                  </div>
+                </div>
+
+                <div class="scan__error" id="scanError" role="alert" aria-live="polite"></div>
+
+                <div class="progress progress--hidden" id="progressWrap" aria-label="Scan progress">
+                  <div class="progress__stages" aria-hidden="true">
+                    <span class="progress__stage" id="stage0">Acquiring Signal</span>
+                    <span class="progress__stage" id="stage1">Preprocessing</span>
+                    <span class="progress__stage" id="stage2">Running Inference</span>
+                    <span class="progress__stage" id="stage3">Complete</span>
+                  </div>
+                  <div class="progress__bar" aria-hidden="true">
+                    <div class="progress__fill" id="progressFill"></div>
+                  </div>
+                  <div class="progress__label" id="progressLabel">—</div>
+                </div>
+
+                <div class="scan__meta meta meta--hidden" id="scanMeta">
+                  <div class="meta__item">Confidence: <span id="metaConfidence">—</span></div>
+                  <div class="meta__item">Model: <span id="metaModel">PLSR v1.0</span></div>
+                  <div class="meta__item">Latency: <span id="metaLatency">~2.4s</span></div>
+                </div>
+              </section>
+
+              <!-- Right: Last Scan Summary -->
+              <section class="card stats" aria-label="Last scan summary">
+                <div class="stats__title">Last Scan Summary</div>
+
+                <div class="stats__empty" id="summaryEmpty">
+                  No scan data yet. Initiate a scan to begin.
+                </div>
+
+                <div class="stats__body stats__body--hidden" id="summaryBody">
+                  <div class="kv">
+                    <div class="kv__row">
+                      <div class="kv__key">Scan ID</div>
+                      <div class="kv__val" id="sumScanId">—</div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Timestamp</div>
+                      <div class="kv__val" id="sumTimestamp">—</div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Spectral points analyzed</div>
+                      <div class="kv__val">228</div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Wavelength range</div>
+                      <div class="kv__val">900nm — 1700nm</div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Preprocessing</div>
+                      <div class="kv__val">SG Filter + SNV</div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Model</div>
+                      <div class="kv__val">PLSR Regression</div>
+                    </div>
+                    <div class="kv__row kv__row--stack">
+                      <div class="kv__key">Confidence</div>
+                      <div class="kv__val">
+                        <div class="confbar">
+                          <div class="confbar__top">
+                            <span id="sumConfidenceText">—</span>
+                          </div>
+                          <div class="confbar__track" aria-hidden="true">
+                            <div class="confbar__fill" id="sumConfidenceFill"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="kv__row">
+                      <div class="kv__key">Status</div>
+                      <div class="kv__val">
+                        <span class="statuspill statuspill--green">
+                          <span class="statuspill__dot" aria-hidden="true"></span>
+                          Prediction Complete
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Charts Row -->
+        <section class="section">
+          <div class="container">
+            <div class="charts">
+              <section class="card chartcard" aria-label="Nutrient history chart">
+                <div class="card__header">
+                  <div class="card__title">Nutrient History</div>
+                  <div class="card__meta">Last 20 scans</div>
+                </div>
+                <div class="chartbox">
+                  <div class="chartbox__overlay" id="trendOverlay">Run your first scan to see nutrient trends</div>
+                  <canvas id="trendChart" height="280"></canvas>
+                </div>
+              </section>
+
+              <section class="card chartcard" aria-label="Spectral curve chart">
+                <div class="card__header">
+                  <div class="card__title">NIR Spectral Curve</div>
+                  <div class="card__meta">228 wavelength points</div>
+                </div>
+                <div class="chartbox">
+                  <div class="chartbox__overlay" id="spectralOverlay">Spectral data will appear here</div>
+                  <canvas id="spectralChart" height="280"></canvas>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. Scan History Table -->
+        <section class="section">
+          <div class="container">
+            <section class="card tablecard" aria-label="Scan history">
+              <div class="card__header">
+                <div class="card__title">Scan History</div>
+                <div class="card__meta">Showing last 5 scans</div>
+              </div>
+
+              <div class="tablewrap" id="historyWrap">
+                <div class="tableempty" id="tableEmpty">No scan history yet.</div>
+                <div class="tablewrap__scroll tablewrap__scroll--hidden" id="tableScroll">
+                  <div class="tablegrid tablegrid--head">
+                    <div>Scan #</div>
+                    <div>Timestamp</div>
+                    <div>N (%)</div>
+                    <div>P (mg/kg)</div>
+                    <div>K (mg/kg)</div>
+                    <div>OC (%)</div>
+                    <div>Confidence</div>
+                    <div>Status</div>
+                  </div>
+                  <div id="historyBody"></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 7. How It Works -->
+        <section class="section how">
+          <div class="container">
+            <div class="how__head">
+              <h2 class="how__title">How It Works</h2>
+              <p class="how__subtitle">From soil sample to nutrient insight in under 5 seconds.</p>
+            </div>
+
+            <div class="how__grid">
+              <article class="howcard">
+                <div class="howcard__num">01</div>
+                <div class="howcard__title">Spectral Acquisition</div>
+                <div class="howcard__text">
+                  NIR light (900–1700nm) illuminates the soil sample. The sensor captures 228 individual reflectance readings,
+                  one per 3.5nm wavelength step — forming a unique spectral fingerprint.
+                </div>
+              </article>
+
+              <article class="howcard">
+                <div class="howcard__num">02</div>
+                <div class="howcard__title">Signal Preprocessing</div>
+                <div class="howcard__text">
+                  Savitzky-Golay smoothing eliminates high-frequency noise without distorting mineral absorption peaks. SNV
+                  normalization removes moisture and particle-size interference.
+                </div>
+              </article>
+
+              <article class="howcard">
+                <div class="howcard__num">03</div>
+                <div class="howcard__title">AI Inference</div>
+                <div class="howcard__text">
+                  The 228-point spectral vector is sent to the cloud inference engine. A PLSR model — trained on thousands of
+                  real soil samples — predicts N, P, K, and Organic Carbon concentrations.
+                </div>
+              </article>
+
+              <article class="howcard">
+                <div class="howcard__num">04</div>
+                <div class="howcard__title">Insight Delivery</div>
+                <div class="howcard__text">
+                  Results appear on the dashboard in under 5 seconds with colour-coded health indicators, confidence scores,
+                  GPS-tagged history, and exportable data.
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- 8. Minimal Footer -->
+      <footer class="footer">
+        <div class="footer__inner">
+          <div class="footer__left">
+            <div class="footer__brand">TerraSense</div>
+            <div class="footer__sub">NIR-Powered Soil Intelligence Platform</div>
+          </div>
+          <div class="footer__right">
+            <a href="#" class="footer__link">GitHub</a>
+            <a href="#" class="footer__link">API Docs</a>
+            <a href="#" class="footer__link">Contact</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
+
