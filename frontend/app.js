@@ -1,267 +1,234 @@
-/* global Chart */
-
 const API = "http://localhost:8000";
+const SPECTRAL_FEATURES = 161;
 
-const WAVE_COUNT = 228;
-const WAVE_START = 900;
-const WAVE_END = 1700;
+// Wavelength labels from 900nm to 1700nm (161 evenly spaced points).
+const WAVELENGTHS = Array.from(
+  { length: SPECTRAL_FEATURES },
+  (_, i) => Math.round(900 + (i * (1700 - 900)) / (SPECTRAL_FEATURES - 1))
+);
 
 let trendChart = null;
 let spectralChart = null;
 
-let lastHistory = [];
-let scansCompleted = 0;
-let lastScanId = null;
-let isOnline = false;
+let scanCount = 0;
+let lastResults = [];
 
 const el = {
-  statusDot: document.getElementById("statusDot"),
-  statusText: document.getElementById("statusText"),
+  statusDot: document.getElementById("status-dot"),
+  statusText: document.getElementById("status-text"),
 
-  scanBtn: document.getElementById("scanBtn"),
-  rings: document.getElementById("rings"),
-  scanError: document.getElementById("scanError"),
+  scanBtn: document.getElementById("scan-btn"),
+  scanPanel: document.getElementById("scan-panel"),
+  scanCounter: document.getElementById("scan-counter"),
+  scanError: document.getElementById("scan-error"),
 
-  progressWrap: document.getElementById("progressWrap"),
-  progressFill: document.getElementById("progressFill"),
-  progressLabel: document.getElementById("progressLabel"),
-  stage0: document.getElementById("stage0"),
-  stage1: document.getElementById("stage1"),
-  stage2: document.getElementById("stage2"),
-  stage3: document.getElementById("stage3"),
+  progressContainer: document.getElementById("progress-container"),
+  progressBarFill: document.getElementById("progress-bar-fill"),
+  progressLabel: document.getElementById("progress-label"),
 
-  scanCountText: document.getElementById("scanCountText"),
+  scanMeta: document.getElementById("scan-meta"),
+  metaConfidence: document.getElementById("meta-confidence"),
+  metaLatency: document.getElementById("meta-latency"),
 
-  meta: document.getElementById("scanMeta"),
-  metaConfidence: document.getElementById("metaConfidence"),
-  metaModel: document.getElementById("metaModel"),
-  metaLatency: document.getElementById("metaLatency"),
+  statsEmpty: document.getElementById("stats-empty"),
+  statsContent: document.getElementById("stats-content"),
 
-  summaryEmpty: document.getElementById("summaryEmpty"),
-  summaryBody: document.getElementById("summaryBody"),
-  sumScanId: document.getElementById("sumScanId"),
-  sumTimestamp: document.getElementById("sumTimestamp"),
-  sumConfidenceText: document.getElementById("sumConfidenceText"),
-  sumConfidenceFill: document.getElementById("sumConfidenceFill"),
+  statId: document.getElementById("stat-id"),
+  statTime: document.getElementById("stat-time"),
+  statConfidence: document.getElementById("stat-confidence"),
+  statStatus: document.getElementById("stat-status"),
+  confidenceBarFill: document.getElementById("confidence-bar-fill"),
 
-  cardN: document.getElementById("cardN"),
-  cardP: document.getElementById("cardP"),
-  cardK: document.getElementById("cardK"),
-  cardOC: document.getElementById("cardOC"),
-
-  valueN: document.getElementById("valueN"),
-  valueP: document.getElementById("valueP"),
-  valueK: document.getElementById("valueK"),
-  valueOC: document.getElementById("valueOC"),
-
-  badgeN: document.getElementById("badgeN"),
-  badgeP: document.getElementById("badgeP"),
-  badgeK: document.getElementById("badgeK"),
-  badgeOC: document.getElementById("badgeOC"),
-
-  trendN: document.getElementById("trendN"),
-  trendP: document.getElementById("trendP"),
-  trendK: document.getElementById("trendK"),
-  trendOC: document.getElementById("trendOC"),
-
-  trendOverlay: document.getElementById("trendOverlay"),
-  spectralOverlay: document.getElementById("spectralOverlay"),
+  trendOverlay: document.getElementById("trend-overlay"),
+  spectralOverlay: document.getElementById("spectral-overlay"),
   trendCanvas: document.getElementById("trendChart"),
   spectralCanvas: document.getElementById("spectralChart"),
 
-  tableEmpty: document.getElementById("tableEmpty"),
-  tableScroll: document.getElementById("tableScroll"),
-  historyBody: document.getElementById("historyBody"),
-};
+  historyEmpty: document.getElementById("history-empty"),
+  historyTable: document.getElementById("history-table"),
+  historyTbody: document.getElementById("history-tbody"),
 
-const nutrientDefs = {
-  N: { label: "Nitrogen", green: 2, amber: 1, valueEl: el.valueN, badgeEl: el.badgeN, trendEl: el.trendN, cardEl: el.cardN },
-  P: { label: "Phosphorus", green: 200, amber: 50, valueEl: el.valueP, badgeEl: el.badgeP, trendEl: el.trendP, cardEl: el.cardP },
-  K: { label: "Potassium", green: 400, amber: 100, valueEl: el.valueK, badgeEl: el.badgeK, trendEl: el.trendK, cardEl: el.cardK },
-  OC: { label: "Organic Carbon", green: 3, amber: 1, valueEl: el.valueOC, badgeEl: el.badgeOC, trendEl: el.trendOC, cardEl: el.cardOC },
+  cardValue: {
+    N: document.getElementById("val-N"),
+    P: document.getElementById("val-P"),
+    K: document.getElementById("val-K"),
+    OC: document.getElementById("val-OC"),
+  },
+  cardBadge: {
+    N: document.getElementById("badge-N"),
+    P: document.getElementById("badge-P"),
+    K: document.getElementById("badge-K"),
+    OC: document.getElementById("badge-OC"),
+  },
+  cardTrend: {
+    N: document.getElementById("trend-N"),
+    P: document.getElementById("trend-P"),
+    K: document.getElementById("trend-K"),
+    OC: document.getElementById("trend-OC"),
+  },
+  cardEl: {
+    N: document.getElementById("card-N"),
+    P: document.getElementById("card-P"),
+    K: document.getElementById("card-K"),
+    OC: document.getElementById("card-OC"),
+  },
 };
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function showScanError(message) {
-  if (!message) {
-    el.scanError.style.display = "none";
-    el.scanError.textContent = "";
-    return;
-  }
-  el.scanError.style.display = "block";
-  el.scanError.textContent = message;
-}
-
-function setSystemStatus(online) {
-  isOnline = !!online;
-  el.statusDot.classList.remove("status__dot--online", "status__dot--offline");
-  el.statusDot.classList.add(online ? "status__dot--online" : "status__dot--offline");
-  el.statusText.textContent = online ? "System Online" : "System Offline";
-}
-
-function setScanningState(scanning) {
-  el.rings.classList.toggle("rings--scanning", scanning);
-  el.scanBtn.disabled = scanning;
-}
-
-function setStageActive(stageIdx) {
-  const stages = [el.stage0, el.stage1, el.stage2, el.stage3];
-  stages.forEach((node, i) => {
-    node.classList.remove("progress__stage--active", "progress__stage--done");
-    if (i < stageIdx) node.classList.add("progress__stage--done");
-    if (i === stageIdx) node.classList.add("progress__stage--active");
-  });
-}
-
-function resetProgress() {
-  el.progressFill.style.width = "0%";
-  el.progressLabel.textContent = "—";
-  setStageActive(-1);
-}
-
-function formatNumber(n) {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return "—";
-  const digits = Math.abs(num) >= 100 ? 1 : 2;
-  return num.toFixed(digits);
-}
-
-function getValueFromScan(scan, nutrient) {
-  if (!scan) return NaN;
-  const keysByNutrient = {
-    N: ["N", "n"],
-    P: ["P", "p"],
-    K: ["K", "k"],
-    OC: ["OC", "oc", "organic_carbon", "organicCarbon"],
-  };
-  const keys = keysByNutrient[nutrient] || [nutrient];
-  for (const k of keys) {
-    if (scan[k] !== undefined && scan[k] !== null) {
-      const v = Number(scan[k]);
-      if (Number.isFinite(v)) return v;
-    }
-  }
-  return NaN;
-}
-
 /**
- * Calls GET /health and updates the navbar indicator.
- * Runs on load and every 30 seconds.
+ * Calls GET /health and updates the navbar system status dot + text.
  */
 async function checkHealth() {
   try {
     const res = await fetch(`${API}/health`);
-    if (!res.ok) throw new Error(`Health status ${res.status}`);
+    if (!res.ok) throw new Error(`Health failed with status ${res.status}`);
     const data = await res.json();
-    setSystemStatus(!!(data && data.status === "ok"));
+    if (data && data.status === "ok") {
+      el.statusDot.classList.remove("offline");
+      el.statusDot.classList.add("online");
+      el.statusText.textContent = "System Online";
+      return;
+    }
+    throw new Error("Unexpected health payload");
   } catch (err) {
-    setSystemStatus(false);
+    el.statusDot.classList.remove("online");
+    el.statusDot.classList.add("offline");
+    el.statusText.textContent = "System Offline";
   }
 }
 
-/**
- * Formats an ISO timestamp to "27 Mar 2026, 14:32:05".
- * @param {string} isoString
- * @returns {string}
- */
+function formatNumberOrDash(value, decimals) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(decimals);
+}
+
+function showScanError(show) {
+  if (show) {
+    el.scanError.classList.remove("hidden");
+  } else {
+    el.scanError.classList.add("hidden");
+  }
+}
+
+function setScanning(scanning) {
+  el.scanPanel.classList.toggle("scanning", scanning);
+  el.scanBtn.disabled = scanning;
+}
+
 function formatTimestamp(isoString) {
   const d = new Date(isoString);
-  if (Number.isNaN(d.getTime())) return "—";
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = d.toLocaleString("en-GB", { month: "short" });
-  const year = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${day} ${month} ${year}, ${hh}:${mm}:${ss}`;
+  if (!Number.isFinite(d.getTime())) return "—";
+  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const time = d.toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return `${date}, ${time}`;
 }
 
 /**
- * Returns a badge label + CSS class for a nutrient value.
+ * Returns the badge information for a nutrient and its health thresholds.
  * @param {"N"|"P"|"K"|"OC"} nutrient
  * @param {number} value
- * @returns {{label: string, color: "green"|"amber"|"red"}}
+ * @returns {{label: string, className: string}}
  */
 function getBadge(nutrient, value) {
-  const cfg = nutrientDefs[nutrient];
   const v = Number(value);
-  if (!Number.isFinite(v)) return { label: "—", color: "red" };
-  if (v >= cfg.green) return { label: "Optimal", color: "green" };
-  if (v >= cfg.amber) return { label: "Low", color: "amber" };
-  return { label: "Deficient", color: "red" };
+  if (!Number.isFinite(v)) return { label: "—", className: "badge-deficient" };
+
+  if (nutrient === "N") {
+    if (v >= 2) return { label: "Optimal", className: "badge-optimal" };
+    if (v >= 1) return { label: "Low", className: "badge-low" };
+    return { label: "Deficient", className: "badge-deficient" };
+  }
+
+  if (nutrient === "P") {
+    if (v >= 200) return { label: "Optimal", className: "badge-optimal" };
+    if (v >= 50) return { label: "Low", className: "badge-low" };
+    return { label: "Deficient", className: "badge-deficient" };
+  }
+
+  if (nutrient === "K") {
+    if (v >= 400) return { label: "Optimal", className: "badge-optimal" };
+    if (v >= 100) return { label: "Low", className: "badge-low" };
+    return { label: "Deficient", className: "badge-deficient" };
+  }
+
+  // OC
+  if (v >= 3) return { label: "Optimal", className: "badge-optimal" };
+  if (v >= 1) return { label: "Low", className: "badge-low" };
+  return { label: "Deficient", className: "badge-deficient" };
 }
 
 /**
- * Compares the last two scans for a nutrient and returns ↑, ↓, or —.
+ * Compares the last two scans and returns an arrow for nutrient trend.
  * @param {"N"|"P"|"K"|"OC"} nutrient
- * @param {Array<any>} history
- * @returns {"↑"|"↓"|"—"}
+ * @returns {"↑"|"↓"|"—"|""}
  */
-function getTrendArrow(nutrient, history) {
-  if (!Array.isArray(history) || history.length < 2) return "—";
-  const a = history[history.length - 2];
-  const b = history[history.length - 1];
-  const va = getValueFromScan(a, nutrient);
-  const vb = getValueFromScan(b, nutrient);
-  if (!Number.isFinite(va) || !Number.isFinite(vb)) return "—";
-  if (vb > va) return "↑";
-  if (vb < va) return "↓";
+function getTrendArrow(nutrient) {
+  if (lastResults.length < 2) return "";
+  const prev = lastResults[lastResults.length - 2][nutrient];
+  const curr = lastResults[lastResults.length - 1][nutrient];
+
+  if (!Number.isFinite(prev) || !Number.isFinite(curr)) return "";
+  if (curr > prev) return "↑";
+  if (curr < prev) return "↓";
   return "—";
 }
 
-function setBadgeEl(badgeEl, badge) {
-  badgeEl.classList.remove("badge--hidden", "badge--green", "badge--amber", "badge--red");
-  badgeEl.classList.add(`badge--${badge.color}`);
-  badgeEl.textContent = badge.label;
-  badgeEl.setAttribute("aria-hidden", "false");
-}
-
-function setTrendEl(trendEl, arrow) {
-  trendEl.classList.remove("trend--hidden");
-  trendEl.setAttribute("aria-hidden", "false");
-  const cls =
-    arrow === "↑" ? "trend__arrow--up" : arrow === "↓" ? "trend__arrow--down" : "trend__arrow--flat";
-  trendEl.innerHTML = `<span class="trend__arrow ${cls}">${arrow}</span><span>vs previous</span>`;
-}
-
 /**
- * Updates metric card values, badge pills, and trend arrows.
- * @param {any} data API response from POST /api/v1/predict
+ * Updates the nutrient metric cards (values, badges, trend arrows).
+ * Also stores current values in `lastResults` (keeps last 2).
  */
 function updateCards(data) {
-  const mapping = {
-    N: getValueFromScan(data, "N"),
-    P: getValueFromScan(data, "P"),
-    K: getValueFromScan(data, "K"),
-    OC: getValueFromScan(data, "OC"),
+  const current = {
+    N: Number(data?.N),
+    P: Number(data?.P),
+    K: Number(data?.K),
+    OC: Number(data?.OC),
   };
 
-  Object.entries(mapping).forEach(([nutrient, value]) => {
-    const cfg = nutrientDefs[nutrient];
-    cfg.valueEl.textContent = formatNumber(value);
-    setBadgeEl(cfg.badgeEl, getBadge(nutrient, value));
-    cfg.cardEl.classList.add("metric--active");
+  lastResults.push(current);
+  while (lastResults.length > 2) lastResults.shift();
+
+  const order = ["N", "P", "K", "OC"];
+  order.forEach((nutrient) => {
+    const value = current[nutrient];
+
+    // Values formatting: N/OC => 3 decimals, P/K => 1 decimal.
+    if (nutrient === "N" || nutrient === "OC") {
+      el.cardValue[nutrient].textContent = formatNumberOrDash(value, 3);
+    } else {
+      el.cardValue[nutrient].textContent = formatNumberOrDash(value, 1);
+    }
+
+    const badge = getBadge(nutrient, value);
+    const badgeEl = el.cardBadge[nutrient];
+    badgeEl.textContent = badge.label;
+    badgeEl.classList.remove("hidden", "badge-optimal", "badge-low", "badge-deficient");
+    badgeEl.classList.add(badge.className);
+
+    el.cardEl[nutrient].classList.add("active");
+
+    const arrow = getTrendArrow(nutrient);
+    const trendEl = el.cardTrend[nutrient];
+    trendEl.classList.remove("hidden", "trend-up", "trend-down");
+    trendEl.textContent = "";
+
+    if (!arrow) {
+      trendEl.classList.add("hidden");
+      return;
+    }
+
+    trendEl.textContent = arrow;
+    if (arrow === "↑") trendEl.classList.add("trend-up");
+    if (arrow === "↓") trendEl.classList.add("trend-down");
   });
-
-  // Trend arrows appear only once there are at least 2 scans in this session.
-  if (scansCompleted >= 2 && Array.isArray(lastHistory) && lastHistory.length >= 2) {
-    (/** @type {Array<"N"|"P"|"K"|"OC">} */ (["N", "P", "K", "OC"])).forEach((nutrient) => {
-      const arrow = getTrendArrow(nutrient, lastHistory);
-      setTrendEl(nutrientDefs[nutrient].trendEl, arrow);
-    });
-  }
-}
-
-function buildWavelengthLabels() {
-  const step = (WAVE_END - WAVE_START) / (WAVE_COUNT - 1);
-  return Array.from({ length: WAVE_COUNT }, (_, i) => `${(WAVE_START + i * step).toFixed(1)}nm`);
 }
 
 /**
- * Destroys and recreates the nutrient trend chart with last 20 scans.
+ * Destroys and recreates the nutrient history chart.
  * @param {Array<any>} history
  */
 function updateTrendChart(history) {
@@ -270,22 +237,10 @@ function updateTrendChart(history) {
     trendChart = null;
   }
 
-  const hasData = Array.isArray(history) && history.length > 0;
-  el.trendOverlay.classList.toggle("chartbox__overlay--hidden", hasData);
+  el.trendOverlay.classList.add("hidden");
 
-  const scans = hasData ? history.slice(-20) : [];
-  const labels = scans.map((_, idx) => `Scan ${idx + 1}`);
-
-  const ds = (nutrient, color) => ({
-    label: nutrientDefs[nutrient].label,
-    data: scans.map((s) => getValueFromScan(s, nutrient)),
-    borderColor: color,
-    backgroundColor: "transparent",
-    borderWidth: 2,
-    tension: 0.4,
-    pointRadius: 3,
-    pointHoverRadius: 4,
-  });
+  const safeHistory = Array.isArray(history) ? history : [];
+  const labels = safeHistory.map((_, i) => "Scan " + (i + 1));
 
   const ctx = el.trendCanvas.getContext("2d");
   trendChart = new Chart(ctx, {
@@ -293,35 +248,51 @@ function updateTrendChart(history) {
     data: {
       labels,
       datasets: [
-        ds("N", "#059669"),
-        ds("P", "#7C3AED"),
-        ds("K", "#D97706"),
-        ds("OC", "#1B6B6B"),
+        {
+          label: "Nitrogen",
+          data: safeHistory.map((x) => Number(x?.N)),
+          borderColor: "#059669",
+          tension: 0.4,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
+        {
+          label: "Phosphorus",
+          data: safeHistory.map((x) => Number(x?.P)),
+          borderColor: "#7C3AED",
+          tension: 0.4,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
+        {
+          label: "Potassium",
+          data: safeHistory.map((x) => Number(x?.K)),
+          borderColor: "#D97706",
+          tension: 0.4,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
+        {
+          label: "Organic Carbon",
+          data: safeHistory.map((x) => Number(x?.OC)),
+          borderColor: "#1B6B6B",
+          tension: 0.4,
+          pointRadius: 3,
+          borderWidth: 2,
+        },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          position: "top",
-          labels: { usePointStyle: true, boxWidth: 10 },
-        },
-        tooltip: {
-          backgroundColor: "rgba(17,24,39,0.92)",
-          titleColor: "#fff",
-          bodyColor: "rgba(255,255,255,0.92)",
-          borderColor: "rgba(255,255,255,0.12)",
-          borderWidth: 1,
-          padding: 10,
-          displayColors: true,
-        },
+        legend: { position: "top" },
       },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: {
-          grid: { color: "rgba(229,231,235,0.7)" },
-          ticks: { color: "#6B7280", maxTicksLimit: 10 },
+          grid: { color: "rgba(0,0,0,0.05)" },
+          ticks: { color: "#6B7280", font: { weight: 600 } },
         },
         y: {
           grid: { display: false },
@@ -333,7 +304,7 @@ function updateTrendChart(history) {
 }
 
 /**
- * Destroys and recreates the spectral curve chart using the given 228-float vector.
+ * Destroys and recreates the raw spectral curve chart using the 161-float vector.
  * @param {number[]} vec
  */
 function updateSpectralChart(vec) {
@@ -342,11 +313,10 @@ function updateSpectralChart(vec) {
     spectralChart = null;
   }
 
-  const hasVec = Array.isArray(vec) && vec.length === WAVE_COUNT;
-  el.spectralOverlay.classList.toggle("chartbox__overlay--hidden", hasVec);
+  el.spectralOverlay.classList.add("hidden");
 
-  const labels = buildWavelengthLabels();
-  const data = hasVec ? vec.map((v) => Number(v)) : Array.from({ length: WAVE_COUNT }, () => null);
+  const safeVec = Array.isArray(vec) && vec.length === SPECTRAL_FEATURES ? vec.map((v) => Number(v)) : [];
+  const labels = WAVELENGTHS.map((w) => `${w}nm`);
 
   const ctx = el.spectralCanvas.getContext("2d");
   spectralChart = new Chart(ctx, {
@@ -356,12 +326,11 @@ function updateSpectralChart(vec) {
       datasets: [
         {
           label: "Reflectance",
-          data,
+          data: safeVec,
           borderColor: "#1B6B6B",
-          backgroundColor: "transparent",
-          borderWidth: 2,
           tension: 0.3,
           pointRadius: 0,
+          borderWidth: 1.5,
         },
       ],
     },
@@ -370,213 +339,192 @@ function updateSpectralChart(vec) {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          backgroundColor: "rgba(17,24,39,0.92)",
-          titleColor: "#fff",
-          bodyColor: "rgba(255,255,255,0.92)",
-          borderColor: "rgba(255,255,255,0.12)",
-          borderWidth: 1,
-          padding: 10,
-          callbacks: {
-            title: (items) => items?.[0]?.label ?? "",
-          },
-        },
       },
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: "#6B7280", maxTicksLimit: 10, autoSkip: true, maxRotation: 0 },
+          ticks: {
+            color: "#6B7280",
+            font: { weight: 600 },
+            callback: function (value, index) {
+              return index % 10 === 0 ? labels[index] : "";
+            },
+          },
+          title: {
+            display: true,
+            text: "Wavelength (nm)",
+          },
         },
         y: {
           min: 0,
           max: 1,
-          grid: { color: "rgba(229,231,235,0.7)" },
+          grid: { color: "rgba(0,0,0,0.05)" },
           ticks: { color: "#6B7280" },
+          title: {
+            display: true,
+            text: "Reflectance",
+          },
         },
       },
     },
   });
 }
 
-function valueColorClass(nutrient, value) {
-  const badge = getBadge(nutrient, value);
-  return badge.color === "green" ? "val--green" : badge.color === "amber" ? "val--amber" : "val--red";
-}
-
 /**
- * Renders the last 5 scans into the history table.
+ * Renders the last 5 scans into the scan history table.
  * @param {Array<any>} history
  */
 function updateHistoryTable(history) {
-  const maxRows = Array.isArray(history) ? Math.min(5, scansCompleted, history.length) : 0;
-  const hasData = maxRows > 0;
-  el.tableEmpty.style.display = hasData ? "none" : "block";
-  el.tableScroll.classList.toggle("tablewrap__scroll--hidden", !hasData);
-  el.historyBody.innerHTML = "";
+  const safeHistory = Array.isArray(history) ? history : [];
+  const last5 = safeHistory.slice(-5).reverse();
 
-  if (!hasData) return;
-
-  const last5 = history.slice(-maxRows).reverse();
-  last5.forEach((scan, idx) => {
-    const scanNumber = scansCompleted - idx;
-    const ts = formatTimestamp(scan.timestamp);
-    const n = getValueFromScan(scan, "N");
-    const p = getValueFromScan(scan, "P");
-    const k = getValueFromScan(scan, "K");
-    const oc = getValueFromScan(scan, "OC");
-    const conf = Number(scan.confidence);
-    const confPct = Number.isFinite(conf) ? (conf <= 1 ? conf * 100 : conf) : NaN;
-
-    const row = document.createElement("div");
-    row.className = "tablegrid trow";
-    row.innerHTML = `
-      <div>${scanNumber}</div>
-      <div>${ts}</div>
-      <div class="${valueColorClass("N", n)}">${formatNumber(n)}</div>
-      <div class="${valueColorClass("P", p)}">${formatNumber(p)}</div>
-      <div class="${valueColorClass("K", k)}">${formatNumber(k)}</div>
-      <div class="${valueColorClass("OC", oc)}">${formatNumber(oc)}</div>
-      <div>${Number.isFinite(confPct) ? `${confPct.toFixed(0)}%` : "—"}</div>
-      <div><span class="pill pill--green">Complete</span></div>
-    `;
-    el.historyBody.appendChild(row);
-  });
-}
-
-function randomScanId() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-function setScanCounter() {
-  el.scanCountText.textContent = `Scans completed: ${scansCompleted}`;
-}
-
-function setSummaryPanel(pred, scanId) {
-  el.summaryEmpty.style.display = "none";
-  el.summaryBody.classList.remove("stats__body--hidden");
-  el.sumScanId.textContent = scanId || "—";
-  el.sumTimestamp.textContent = formatTimestamp(pred?.timestamp);
-
-  const conf = Number(pred?.confidence);
-  const confPct = Number.isFinite(conf) ? (conf <= 1 ? conf * 100 : conf) : NaN;
-  const pctText = Number.isFinite(confPct) ? `${confPct.toFixed(0)}%` : "—";
-  el.sumConfidenceText.textContent = pctText;
-  el.sumConfidenceFill.style.width = Number.isFinite(confPct) ? `${Math.max(0, Math.min(100, confPct))}%` : "0%";
-}
-
-function setScanMeta(pred) {
-  el.meta.classList.remove("meta--hidden");
-  const conf = Number(pred?.confidence);
-  const confPct = Number.isFinite(conf) ? (conf <= 1 ? conf * 100 : conf) : NaN;
-  el.metaConfidence.textContent = Number.isFinite(confPct) ? `${confPct.toFixed(0)}%` : "—";
-  el.metaModel.textContent = "PLSR v1.0";
-  el.metaLatency.textContent = "~2.4s";
-}
-
-function showProgressUI() {
-  el.progressWrap.classList.remove("progress--hidden");
-}
-
-function setProgress(stageIdx, totalStages, label) {
-  setStageActive(stageIdx);
-  el.progressFill.style.width = `${((stageIdx + 1) / totalStages) * 100}%`;
-  el.progressLabel.textContent = label;
-}
-
-/**
- * Full scan flow: progress animation, POST /predict, UI updates, chart updates, GET /history.
- */
-async function simulateScan() {
-  showScanError("");
-
-  // If backend is offline, show message and stop.
-  if (!isOnline) {
-    showScanError("Backend unreachable. Start the server and refresh.");
+  if (last5.length === 0) {
+    el.historyEmpty.classList.remove("hidden");
+    el.historyTable.classList.add("hidden");
+    el.historyTbody.innerHTML = "";
     return;
   }
 
-  setScanningState(true);
-  showProgressUI();
-  resetProgress();
+  el.historyEmpty.classList.add("hidden");
+  el.historyTable.classList.remove("hidden");
+  el.historyTbody.innerHTML = "";
 
-  const stages = ["Acquiring Signal", "Preprocessing", "Running Inference", "Complete"];
-  const stageDelay = 700;
+  last5.forEach((item, index) => {
+    const nBadge = getBadge("N", item?.N);
+    const pBadge = getBadge("P", item?.P);
+    const kBadge = getBadge("K", item?.K);
+    const ocBadge = getBadge("OC", item?.OC);
+
+    const nClass = nBadge.className.replace("badge-", "val-");
+    const pClass = pBadge.className.replace("badge-", "val-");
+    const kClass = kBadge.className.replace("badge-", "val-");
+    const ocClass = ocBadge.className.replace("badge-", "val-");
+
+    const confidence = Number(item?.confidence);
+    const confidencePct = Number.isFinite(confidence) ? confidence * 100 : NaN;
+    const confidenceText = Number.isFinite(confidencePct) ? `${confidencePct.toFixed(0)}%` : "—";
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${index + 1}</td>
+      <td>${item?.scan_id ?? "—"}</td>
+      <td>${formatTimestamp(item?.timestamp)}</td>
+      <td class="${nClass}">${formatNumberOrDash(item?.N, 3)}</td>
+      <td class="${pClass}">${formatNumberOrDash(item?.P, 1)}</td>
+      <td class="${kClass}">${formatNumberOrDash(item?.K, 1)}</td>
+      <td class="${ocClass}">${formatNumberOrDash(item?.OC, 3)}</td>
+      <td>${confidenceText}</td>
+      <td><span class="complete-pill">Complete</span></td>
+    `;
+    el.historyTbody.appendChild(tr);
+  });
+}
+
+/**
+ * Shows the scan meta row under the progress bar.
+ * @param {any} data
+ * @param {string} latency
+ */
+function updateScanMeta(data, latency) {
+  el.scanMeta.classList.remove("hidden");
+
+  const confidence = Number(data?.confidence);
+  const confidencePct = Number.isFinite(confidence) ? confidence * 100 : NaN;
+  el.metaConfidence.textContent = Number.isFinite(confidencePct) ? `${confidencePct.toFixed(0)}%` : "—";
+  el.metaLatency.textContent = latency;
+}
+
+/**
+ * Updates the right-side stats panel after a successful scan.
+ * @param {any} data
+ */
+function updateStatsPanel(data) {
+  el.statsEmpty.classList.add("hidden");
+  el.statsContent.classList.remove("hidden");
+
+  el.statId.textContent = data?.scan_id ?? "—";
+  el.statTime.textContent = formatTimestamp(data?.timestamp);
+
+  const confidence = Number(data?.confidence);
+  const confidencePct = Number.isFinite(confidence) ? confidence * 100 : NaN;
+  el.statConfidence.textContent = Number.isFinite(confidencePct) ? `${confidencePct.toFixed(0)}%` : "—";
+
+  if (Number.isFinite(confidencePct)) {
+    el.confidenceBarFill.style.width = `${Math.max(0, Math.min(100, confidencePct))}%`;
+  } else {
+    el.confidenceBarFill.style.width = "0%";
+  }
+
+  el.statStatus.textContent = "Prediction Complete";
+}
+
+/**
+ * Full scan flow: progress stages, POST /predict, update cards, charts, scan meta, stats, and history.
+ */
+async function simulateScan() {
+  const startTime = Date.now();
 
   try {
+    setScanning(true);
+    el.progressContainer.classList.remove("hidden");
+    showScanError(false);
+    el.scanMeta.classList.add("hidden");
+
+    const stages = ["Acquiring Signal...", "Preprocessing...", "Running Inference...", "Complete"];
+
     for (let i = 0; i < stages.length; i++) {
-      setProgress(i, stages.length, stages[i]);
-      await wait(stageDelay);
+      el.progressLabel.textContent = stages[i];
+      el.progressBarFill.style.width = `${((i + 1) / stages.length) * 100}%`;
+      await wait(700);
     }
 
-    const vec = Array.from({ length: WAVE_COUNT }, () => Math.random());
+    const vec = Array.from({ length: SPECTRAL_FEATURES }, () => Math.random());
 
-    let pred;
+    let data;
     try {
       const res = await fetch(`${API}/api/v1/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ spectral_vector: vec }),
       });
-      if (!res.ok) throw new Error(`Predict status ${res.status}`);
-      pred = await res.json();
+      if (!res.ok) throw new Error(`Predict failed with status ${res.status}`);
+      data = await res.json();
     } catch (err) {
-      showScanError("Backend unreachable. Start the server and refresh.");
+      showScanError(true);
       return;
     }
 
-    // Update counters + summary.
-    scansCompleted += 1;
-    setScanCounter();
-    if (!lastScanId) lastScanId = randomScanId();
-    else lastScanId = randomScanId();
-    setSummaryPanel(pred, lastScanId);
-    setScanMeta(pred);
+    const latency = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
 
-    // Update cards immediately with current prediction.
-    updateCards(pred);
-
-    // Plot spectral curve using the exact vector sent to the API.
+    updateCards(data);
     updateSpectralChart(vec);
+    updateScanMeta(data, latency);
+    updateStatsPanel(data);
 
-    // Fetch history and update trend chart + table, then update trends on cards.
+    scanCount += 1;
+    el.scanCounter.textContent = `Scans completed: ${scanCount}`;
+
+    let history;
     try {
       const res = await fetch(`${API}/api/v1/history`);
-      if (!res.ok) throw new Error(`History status ${res.status}`);
-      const history = await res.json();
-      const safeHistory = Array.isArray(history) ? history : [];
-      const visibleCount = Math.min(20, scansCompleted, safeHistory.length);
-      lastHistory = safeHistory.slice(-visibleCount);
-      updateTrendChart(lastHistory);
-      updateHistoryTable(lastHistory);
-
-      // Now that we have at least 2 scans, trend arrows can appear.
-      updateCards(pred);
+      if (!res.ok) throw new Error(`History failed with status ${res.status}`);
+      history = await res.json();
     } catch (err) {
-      showScanError("Backend unreachable. Start the server and refresh.");
-      // Keep current UI stable even if history fails.
+      // History failure should not stop the rest of the UI update.
+      history = [];
     }
+
+    updateTrendChart(history);
+    updateHistoryTable(history);
+  } catch (err) {
+    showScanError(true);
   } finally {
-    setScanningState(false);
+    setScanning(false);
   }
 }
 
-function initCharts() {
-  updateTrendChart([]);
-  updateSpectralChart([]);
-}
-
-function bindUI() {
-  el.scanBtn.addEventListener("click", simulateScan);
-}
-
-(function init() {
-  bindUI();
-  initCharts();
-  setScanCounter();
+document.addEventListener("DOMContentLoaded", () => {
   checkHealth();
   setInterval(checkHealth, 30000);
-})();
+});
 
