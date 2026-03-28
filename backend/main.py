@@ -27,7 +27,7 @@ class ScanRequest(BaseModel):
     spectral_vector: List[float]
 
 
-SPECTRAL_FEATURES = 161
+SPECTRAL_FEATURES = 401
 
 
 def _random_scan_id(length: int = 6) -> str:

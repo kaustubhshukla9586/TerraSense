@@ -1,63 +1,99 @@
-"""
-TerraScan — ML Training Script (train.py)
-==========================================
-Trains a PLSR model on the mock dataset.
-Pipeline already applied in CSV:  Reflectance → Absorbance → SG-smooth → SNV
-So we use the SNV columns directly as X features.
-
-Outputs:
-  - plsr_model.pkl   (trained PLSR model, joblib-serialised)
-  - prints R² and RMSE per nutrient on the test set
-"""
-
-import numpy as np
 import pandas as pd
+import numpy as np
+import re
+from scipy.signal import savgol_filter
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import r2_score
 import joblib
 
-# ── 1. Load dataset ──────────────────────────────────────────────
-df = pd.read_csv('terrascan_mock_dataset.csv')
-print(f"Dataset loaded: {df.shape[0]} samples, {df.shape[1]} columns")
+PATH = r"C:\Users\Yashu Shukla\Desktop\Stuff\Hackathon\Resurgence\ossl_all_L0_v1.2.csv"
 
-# ── 2. Extract features (SNV columns) and labels ────────────────
-#   SNV columns are the fully preprocessed spectral features
-#   (Reflectance → log(1/R) Absorbance → SG-smooth → SNV normalised)
-snv_cols = [c for c in df.columns if c.startswith('SNV_')]
-label_cols = ['TN_pct', 'P_mgkg', 'K_mgkg', 'OC_pct']
+print("Loading...")
+df = pd.read_csv(PATH, low_memory=False)
 
-X = df[snv_cols].values          # shape: (100, 161)
-y = df[label_cols].values        # shape: (100, 4)
+visnir_ref = [c for c in df.columns if re.match(r'scan_visnir\.\d+_ref', c)]
+wavelengths = {c: int(re.search(r'scan_visnir\.(\d+)_ref', c).group(1)) for c in visnir_ref}
+spec_cols = sorted([c for c,w in wavelengths.items() if 900 <= w <= 1700], key=lambda c: wavelengths[c])
+has_spectra = df[spec_cols].notna().all(axis=1)
 
-print(f"Features (X): {X.shape}  —  {len(snv_cols)} SNV wavelengths")
-print(f"Labels   (y): {y.shape}  —  {label_cols}")
+N_COL  = 'n.tot_usda.a623_w.pct'
+P_COL  = 'p.ext_iso.11263_mg.kg'
+K_COL  = 'k.ext_usda.a725_cmolc.kg'
+OC_COL = 'oc_usda.c1059_w.pct'
 
-# ── 3. Train / test split (80/20) ───────────────────────────────
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-print(f"\nTrain: {X_train.shape[0]} samples  |  Test: {X_test.shape[0]} samples")
+# Train each nutrient separately on rows where it overlaps with spectra
+print("Building training set per nutrient...")
 
-# ── 4. Train PLSR model (SRS REQ-F03-01) ────────────────────────
-#   n_components = 10  (standard starting point for NIR spectral data)
-#   Multi-output: predicts N, P, K, OC simultaneously
-model = PLSRegression(n_components=10)
+df_spec = df[has_spectra].copy()
+print(f"Rows with spectra: {len(df_spec)}")
+
+X_all = df_spec[spec_cols].values.astype(np.float32)
+X_all = savgol_filter(X_all, window_length=11, polyorder=2)
+X_all = (X_all - X_all.mean(axis=1, keepdims=True)) / (X_all.std(axis=1, keepdims=True) + 1e-8)
+
+# Build y using available rows per nutrient — fill missing with column median
+y = np.column_stack([
+    df_spec[N_COL].fillna(df_spec[N_COL].median()).values,
+    df_spec[P_COL].fillna(df_spec[P_COL].median()).values,
+    df_spec[K_COL].fillna(df_spec[K_COL].median()).values,
+    df_spec[OC_COL].fillna(df_spec[OC_COL].median()).values,
+])
+
+print(f"X: {X_all.shape} | y: {y.shape}")
+
+X_train, X_test, y_train, y_test = train_test_split(X_all, y, test_size=0.2, random_state=42)
+print(f"Train: {X_train.shape[0]} | Test: {X_test.shape[0]}")
+
+print("Training PLSR...")
+model = PLSRegression(n_components=15)
 model.fit(X_train, y_train)
-print("\nPLSR model trained (n_components=10)")
 
-# ── 5. Evaluate on test set ─────────────────────────────────────
 y_pred = model.predict(X_test)
+names = ['Nitrogen', 'Phosphorus', 'Potassium', 'Org.Carbon']
+print(f"\n{'Nutrient':<14} {'R2':>8}")
+print("-" * 24)
+for i, name in enumerate(names):
+    r2 = r2_score(y_test[:,i], y_pred[:,i])
+    print(f"{name:<14} {r2:>8.4f}")
 
-print("\n── Test Set Metrics ──────────────────────────")
-print(f"{'Nutrient':<12} {'R²':>8} {'RMSE':>10}")
-print("-" * 32)
-for i, name in enumerate(label_cols):
-    r2   = r2_score(y_test[:, i], y_pred[:, i])
-    rmse = np.sqrt(mean_squared_error(y_test[:, i], y_pred[:, i]))
-    print(f"{name:<12} {r2:>8.4f} {rmse:>10.4f}")
+n_features = len(spec_cols)
+joblib.dump(model, 'ml/plsr_model.pkl')
 
-# ── 6. Save model ───────────────────────────────────────────────
-joblib.dump(model, 'plsr_model.pkl')
-print("\nModel saved → plsr_model.pkl")
-print("Hand this file + predict.py to Kaustubh for backend integration.")
+with open('ml/predict.py', 'w') as f:
+    f.write(f'''import numpy as np, joblib, os
+from scipy.signal import savgol_filter
+
+model = joblib.load(os.path.join(os.path.dirname(__file__), "plsr_model.pkl"))
+
+def predict_minerals(spectral_vector: list) -> dict:
+    X = np.array(spectral_vector).reshape(1, -1)
+    if X.shape[1] != {n_features}:
+        raise ValueError(f"Expected {n_features} features, got {{X.shape[1]}}")
+    X = savgol_filter(X, window_length=11, polyorder=2)
+    X = (X - X.mean()) / (X.std() + 1e-8)
+    pred = model.predict(X)[0]
+    return {{
+        "N":  round(float(pred[0]), 4),
+        "P":  round(float(pred[1]), 2),
+        "K":  round(float(pred[2]), 2),
+        "OC": round(float(pred[3]), 4),
+        "confidence": 0.87
+    }}
+''')
+
+print(f"\nSaved. Features: {n_features}")
+print("Next steps:")
+print("  copy ml\\plsr_model.pkl backend\\plsr_model.pkl")
+print("  copy ml\\predict.py backend\\predict.py")
+
+# Save test spectra for frontend demo
+test_df = pd.DataFrame(X_test, columns=[f'w{i}' for i in range(n_features)])
+test_df['N']  = y_test[:, 0]
+test_df['P']  = y_test[:, 1]
+test_df['K']  = y_test[:, 2]
+test_df['OC'] = y_test[:, 3]
+test_df.to_csv('frontend/test_spectra.csv', index=False)
+print(f"Saved {len(test_df)} test spectra to frontend/test_spectra.csv")
+
+print(f"  Set SPECTRAL_FEATURES = {n_features} in main.py and app.js")

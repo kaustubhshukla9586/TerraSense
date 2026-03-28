@@ -1,7 +1,7 @@
 const API = "http://localhost:8000";
-const SPECTRAL_FEATURES = 161;
+const SPECTRAL_FEATURES = 401;
 
-// Wavelength labels from 900nm to 1700nm (161 evenly spaced points).
+// Wavelength labels from 900nm to 1700nm (401 evenly spaced points).
 const WAVELENGTHS = Array.from(
   { length: SPECTRAL_FEATURES },
   (_, i) => Math.round(900 + (i * (1700 - 900)) / (SPECTRAL_FEATURES - 1))
@@ -304,7 +304,7 @@ function updateTrendChart(history) {
 }
 
 /**
- * Destroys and recreates the raw spectral curve chart using the 161-float vector.
+ * Destroys and recreates the raw spectral curve chart using the 401-float vector.
  * @param {number[]} vec
  */
 function updateSpectralChart(vec) {
