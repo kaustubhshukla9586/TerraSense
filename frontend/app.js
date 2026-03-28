@@ -478,7 +478,15 @@ async function simulateScan() {
       await wait(700);
     }
 
-    const vec = Array.from({ length: SPECTRAL_FEATURES }, () => Math.random());
+    let vec;
+try {
+    const specRes = await fetch(API + '/api/v1/demo-spectrum');
+    const specData = await specRes.json();
+    vec = specData.spectral_vector;
+} catch {
+    // Fallback to random if endpoint not available
+    vec = Array.from({length: SPECTRAL_FEATURES}, () => Math.random());
+}
 
     let data;
     try {
