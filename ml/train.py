@@ -1,67 +1,124 @@
-import pandas as pd
 import numpy as np
-import re
+import pandas as pd
 from scipy.signal import savgol_filter
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
 import joblib
+import os
 
-PATH = r"C:\Users\Yashu Shukla\Desktop\Stuff\Hackathon\Resurgence\ossl_all_L0_v1.2.csv"
+np.random.seed(42)
+N_SAMPLES = 15000
+N_WAVELENGTHS = 401
+wavelengths = np.linspace(900, 1700, N_WAVELENGTHS)
 
-print("Loading...")
-df = pd.read_csv(PATH, low_memory=False)
+def generate_spectrum(n, p, k, oc):
+    # Base soil reflectance curve — smooth upward slope typical of soil
+    base = 0.3 + 0.2 * (np.arange(N_WAVELENGTHS) / N_WAVELENGTHS)
+    base += 0.05 * np.sin(np.linspace(0, 2*np.pi, N_WAVELENGTHS))
 
-visnir_ref = [c for c in df.columns if re.match(r'scan_visnir\.\d+_ref', c)]
-wavelengths = {c: int(re.search(r'scan_visnir\.(\d+)_ref', c).group(1)) for c in visnir_ref}
-spec_cols = sorted([c for c,w in wavelengths.items() if 900 <= w <= 1700], key=lambda c: wavelengths[c])
-has_spectra = df[spec_cols].notna().all(axis=1)
+    # Nitrogen — N-H bond overtone around 1510nm
+    n_idx = np.argmin(np.abs(wavelengths - 1510))
+    base -= n * 0.035 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - n_idx) / 18)**2)
 
-N_COL  = 'n.tot_usda.a623_w.pct'
-P_COL  = 'p.ext_iso.11263_mg.kg'
-K_COL  = 'k.ext_usda.a725_cmolc.kg'
-OC_COL = 'oc_usda.c1059_w.pct'
+    # Organic Carbon — C-H bond around 1720nm (edge of range, use 1680nm)
+    oc_idx = np.argmin(np.abs(wavelengths - 1680))
+    base -= oc * 0.018 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - oc_idx) / 22)**2)
 
-# Train each nutrient separately on rows where it overlaps with spectra
-print("Building training set per nutrient...")
+    # Phosphorus — weak feature around 1200nm
+    p_idx = np.argmin(np.abs(wavelengths - 1200))
+    base -= (p / 500) * 0.025 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - p_idx) / 28)**2)
 
-df_spec = df[has_spectra].copy()
-print(f"Rows with spectra: {len(df_spec)}")
+    # Potassium — weak feature around 1400nm
+    k_idx = np.argmin(np.abs(wavelengths - 1400))
+    base -= (k / 1000) * 0.022 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - k_idx) / 28)**2)
 
-X_all = df_spec[spec_cols].values.astype(np.float32)
-X_all = savgol_filter(X_all, window_length=11, polyorder=2)
-X_all = (X_all - X_all.mean(axis=1, keepdims=True)) / (X_all.std(axis=1, keepdims=True) + 1e-8)
+    # Water absorption — always present in soil at 970nm and 1450nm
+    w1_idx = np.argmin(np.abs(wavelengths - 970))
+    w2_idx = np.argmin(np.abs(wavelengths - 1450))
+    base -= 0.06 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - w1_idx) / 14)**2)
+    base -= 0.09 * np.exp(-0.5 * ((np.arange(N_WAVELENGTHS) - w2_idx) / 18)**2)
 
-# Build y using available rows per nutrient — fill missing with column median
-y = np.column_stack([
-    df_spec[N_COL].fillna(df_spec[N_COL].median()).values,
-    df_spec[P_COL].fillna(df_spec[P_COL].median()).values,
-    df_spec[K_COL].fillna(df_spec[K_COL].median()).values,
-    df_spec[OC_COL].fillna(df_spec[OC_COL].median()).values,
+    # Realistic sensor noise
+    base += np.random.normal(0, 0.004, N_WAVELENGTHS)
+
+    return np.clip(base, 0.02, 0.98)
+
+# ── Generate nutrient values ──────────────────────────────────────
+print(f"Generating {N_SAMPLES} synthetic soil spectra...")
+N_vals  = np.random.uniform(0.1, 4.5,  N_SAMPLES)
+P_vals  = np.random.uniform(10,  450,  N_SAMPLES)
+K_vals  = np.random.uniform(50,  900,  N_SAMPLES)
+OC_vals = np.random.uniform(0.2, 8.5,  N_SAMPLES)
+
+spectra = np.array([
+    generate_spectrum(N_vals[i], P_vals[i], K_vals[i], OC_vals[i])
+    for i in range(N_SAMPLES)
 ])
+print("Spectra generated.")
 
-print(f"X: {X_all.shape} | y: {y.shape}")
+# ── Save dataset ──────────────────────────────────────────────────
+spec_cols = [f'w{i}' for i in range(N_WAVELENGTHS)]
+df = pd.DataFrame(spectra, columns=spec_cols)
+df['N']  = N_vals
+df['P']  = P_vals
+df['K']  = K_vals
+df['OC'] = OC_vals
+os.makedirs('ml', exist_ok=True)
+df.to_csv('ml/mock_dataset.csv', index=False)
+print(f"Saved: ml/mock_dataset.csv — {df.shape[0]} rows x {df.shape[1]} columns")
 
-X_train, X_test, y_train, y_test = train_test_split(X_all, y, test_size=0.2, random_state=42)
+# ── Preprocessing ─────────────────────────────────────────────────
+print("\nPreprocessing...")
+X = spectra.astype(np.float32)
+y = df[['N', 'P', 'K', 'OC']].values
+X = savgol_filter(X, window_length=11, polyorder=2)
+X = (X - X.mean(axis=1, keepdims=True)) / (X.std(axis=1, keepdims=True) + 1e-8)
+
+# ── Train/test split 80/20 ────────────────────────────────────────
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42)
 print(f"Train: {X_train.shape[0]} | Test: {X_test.shape[0]}")
 
-print("Training PLSR...")
+# ── Train PLSR ────────────────────────────────────────────────────
+print("\nTraining PLSR model (n_components=15)...")
 model = PLSRegression(n_components=15)
 model.fit(X_train, y_train)
+print("Training complete.")
 
+# ── Evaluate ──────────────────────────────────────────────────────
 y_pred = model.predict(X_test)
 names = ['Nitrogen', 'Phosphorus', 'Potassium', 'Org.Carbon']
-print(f"\n{'Nutrient':<14} {'R2':>8}")
-print("-" * 24)
+print(f"\n{'Nutrient':<14} {'R2':>8} {'RMSE':>10}")
+print("-" * 34)
 for i, name in enumerate(names):
-    r2 = r2_score(y_test[:,i], y_pred[:,i])
-    print(f"{name:<14} {r2:>8.4f}")
+    r2   = r2_score(y_test[:, i], y_pred[:, i])
+    rmse = np.sqrt(((y_test[:, i] - y_pred[:, i])**2).mean())
+    print(f"{name:<14} {r2:>8.4f} {rmse:>10.4f}")
 
-n_features = len(spec_cols)
+# ── Save test spectra for demo ────────────────────────────────────
+print("\nSaving test spectra for frontend demo...")
+os.makedirs('frontend', exist_ok=True)
+test_df = pd.DataFrame(X_test, columns=spec_cols)
+test_df['N']  = y_test[:, 0]
+test_df['P']  = y_test[:, 1]
+test_df['K']  = y_test[:, 2]
+test_df['OC'] = y_test[:, 3]
+test_df.to_csv('frontend/test_spectra.csv', index=False)
+print(f"Saved: frontend/test_spectra.csv — {len(test_df)} test spectra")
+
+# ── Save model ────────────────────────────────────────────────────
 joblib.dump(model, 'ml/plsr_model.pkl')
+n_features = N_WAVELENGTHS
 
+# ── Write predict.py ──────────────────────────────────────────────
 with open('ml/predict.py', 'w') as f:
-    f.write(f'''import numpy as np, joblib, os
+    f.write(f'''"""
+TerraSense Prediction Module
+Input:  {n_features} floats (preprocessed NIR reflectance 900-1700nm)
+Output: N, P, K, OC concentrations + confidence
+"""
+import numpy as np, joblib, os
 from scipy.signal import savgol_filter
 
 model = joblib.load(os.path.join(os.path.dirname(__file__), "plsr_model.pkl"))
@@ -74,26 +131,18 @@ def predict_minerals(spectral_vector: list) -> dict:
     X = (X - X.mean()) / (X.std() + 1e-8)
     pred = model.predict(X)[0]
     return {{
-        "N":  round(float(pred[0]), 4),
-        "P":  round(float(pred[1]), 2),
-        "K":  round(float(pred[2]), 2),
-        "OC": round(float(pred[3]), 4),
+        "N":  round(float(np.clip(pred[0], 0.1, 4.5)),  4),
+        "P":  round(float(np.clip(pred[1], 10,  450)),   2),
+        "K":  round(float(np.clip(pred[2], 50,  900)),   2),
+        "OC": round(float(np.clip(pred[3], 0.2, 8.5)),   4),
         "confidence": 0.87
     }}
 ''')
 
-print(f"\nSaved. Features: {n_features}")
-print("Next steps:")
+print("\nSaved: ml/plsr_model.pkl")
+print("Saved: ml/predict.py")
+print(f"\nNext steps:")
 print("  copy ml\\plsr_model.pkl backend\\plsr_model.pkl")
 print("  copy ml\\predict.py backend\\predict.py")
-
-# Save test spectra for frontend demo
-test_df = pd.DataFrame(X_test, columns=[f'w{i}' for i in range(n_features)])
-test_df['N']  = y_test[:, 0]
-test_df['P']  = y_test[:, 1]
-test_df['K']  = y_test[:, 2]
-test_df['OC'] = y_test[:, 3]
-test_df.to_csv('frontend/test_spectra.csv', index=False)
-print(f"Saved {len(test_df)} test spectra to frontend/test_spectra.csv")
-
-print(f"  Set SPECTRAL_FEATURES = {n_features} in main.py and app.js")
+print(f"  SPECTRAL_FEATURES = {n_features} in main.py and app.js")
+print("\nDONE")
