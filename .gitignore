@@ -5,3 +5,4 @@ testingsoildata.py
 ml/mock_dataset.csv
 .env
 *.env
+.claude
