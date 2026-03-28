@@ -39,10 +39,14 @@ class AdvisoryRequest(BaseModel):
     P: float
     K: float
     OC: float
+    pH: float
+    moisture: float
     n_status: str
     p_status: str
     k_status: str
     oc_status: str
+    ph_status: str
+    moisture_status: str
 
 
 def _random_scan_id(length: int = 6) -> str:
@@ -115,8 +119,10 @@ def advisory(req: AdvisoryRequest):
         f"- Phosphorus: {req.P} mg/kg ({req.p_status})\n"
         f"- Potassium: {req.K} mg/kg ({req.k_status})\n"
         f"- Organic Carbon: {req.OC}% ({req.oc_status})\n"
+        f"- pH: {req.pH} ({req.ph_status}: Acidic if <6.0, Optimal if 6.0-7.5, Alkaline if >7.5)\n"
+        f"- Soil Moisture: {req.moisture}% ({req.moisture_status}: Low if <15, Optimal if 15-25, High if >25)\n"
         f"For a farm in North India (Punjab region):\n"
-        f"1. Top 3 suitable crops this season\n"
+        f"1. Top 3 suitable crops this season with brief reason\n"
         f"2. Specific fertilizer recommendations with quantity per hectare\n"
         f"3. Most urgent soil health action\n"
         f"Reply in simple language a farmer can understand. Be specific with quantities."
