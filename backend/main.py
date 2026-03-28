@@ -8,7 +8,10 @@ import string
 import sys
 import os
 import pandas as pd
-import numpy as np 
+import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.append(os.path.dirname(__file__))
 from predict import predict_minerals
@@ -24,18 +27,38 @@ app.add_middleware(
 
 scan_history: List[dict] = []
 
+SPECTRAL_FEATURES = 401
+
 
 class ScanRequest(BaseModel):
     spectral_vector: List[float]
 
 
-SPECTRAL_FEATURES = 401
+class AdvisoryRequest(BaseModel):
+    N: float
+    P: float
+    K: float
+    OC: float
+    n_status: str
+    p_status: str
+    k_status: str
+    oc_status: str
 
 
 def _random_scan_id(length: int = 6) -> str:
     chars = string.ascii_uppercase + string.digits
     chars = chars.replace("O", "").replace("I", "").replace("0", "").replace("1", "")
     return "".join(random.choice(chars) for _ in range(length))
+
+
+# Load test spectra on startup
+test_spectra = None
+_test_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'test_spectra.csv')
+if os.path.exists(_test_path):
+    _test_df = pd.read_csv(_test_path)
+    _spec_cols = [c for c in _test_df.columns if c.startswith('w')]
+    test_spectra = _test_df[_spec_cols].values
+    print(f"Loaded {len(test_spectra)} demo spectra")
 
 
 @app.get("/health")
@@ -62,23 +85,46 @@ def predict(req: ScanRequest):
     scan_history.append(enriched)
     return enriched
 
-test_spectra = None
-_test_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'test_spectra.csv')
-if os.path.exists(_test_path):
-    _test_df = pd.read_csv(_test_path)
-    _spec_cols = [c for c in _test_df.columns if c.startswith('w')]
-    test_spectra = _test_df[_spec_cols].values
-    print(f"Loaded {len(test_spectra)} demo spectra")
 
-@app.get("/api/v1/history")
-def history():
-    return scan_history[-20:]
-
-@app.get('/api/v1/demo-spectrum')
+@app.get("/api/v1/demo-spectrum")
 def get_demo_spectrum():
     """Returns a real spectrum from test set for demo purposes"""
     if test_spectra is not None:
         idx = int(np.random.randint(0, len(test_spectra)))
         return {"spectral_vector": test_spectra[idx].tolist()}
-    # Fallback if file not found
     return {"spectral_vector": [float(np.random.uniform(0.1, 0.9)) for _ in range(SPECTRAL_FEATURES)]}
+
+
+@app.get("/api/v1/history")
+def history():
+    return scan_history[-20:]
+
+
+@app.post("/api/v1/advisory")
+def advisory(req: AdvisoryRequest):
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    from groq import Groq
+    client = Groq(api_key=api_key)
+
+    prompt = (
+        f"You are an agricultural advisor for Indian farmers. Given soil analysis:\n"
+        f"- Nitrogen: {req.N}% ({req.n_status})\n"
+        f"- Phosphorus: {req.P} mg/kg ({req.p_status})\n"
+        f"- Potassium: {req.K} mg/kg ({req.k_status})\n"
+        f"- Organic Carbon: {req.OC}% ({req.oc_status})\n"
+        f"For a farm in North India (Punjab region):\n"
+        f"1. Top 3 suitable crops this season\n"
+        f"2. Specific fertilizer recommendations with quantity per hectare\n"
+        f"3. Most urgent soil health action\n"
+        f"Reply in simple language a farmer can understand. Be specific with quantities."
+    )
+
+    chat_completion = client.chat.completions.create(
+        messages=[{"role": "user", "content": prompt}],
+        model="llama-3.3-70b-versatile",
+    )
+
+    return {"advisory": chat_completion.choices[0].message.content}

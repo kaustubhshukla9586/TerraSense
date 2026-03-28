@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TerraSense — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&family=Chivo+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  </head>
+  <body class="dashboard-body">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__header">
+        <a href="index.html" class="sidebar__logo">TerraSense</a>
+      </div>
+      <nav class="sidebar__nav">
+        <button class="sidebar__item sidebar__item--active" data-panel="scan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          Scan
+        </button>
+        <button class="sidebar__item" data-panel="history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          History
+        </button>
+        <button class="sidebar__item" data-panel="advisory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c1 0 1.5-.5 1.5-1v-1.5c0-.5.5-1 1-1H17c2.8 0 5-2.2 5-5 0-5-4.5-9.5-10-11.5z"/><circle cx="8" cy="10" r="1.5" fill="currentColor"/><circle cx="12" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="10" r="1.5" fill="currentColor"/></svg>
+          Advisory
+        </button>
+        <button class="sidebar__item" data-panel="gps">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          GPS
+        </button>
+        <button class="sidebar__item" data-panel="export">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+      </nav>
+      <div class="sidebar__footer">
+        <span class="sidebar__version">v1.0 &middot; PLSR</span>
+      </div>
+    </aside>
+
+    <!-- Mobile Bottom Nav -->
+    <nav class="mobile-nav" id="mobile-nav">
+      <button class="mobile-nav__item mobile-nav__item--active" data-panel="scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/></svg>
+        Scan
+      </button>
+      <button class="mobile-nav__item" data-panel="history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+      </button>
+      <button class="mobile-nav__item" data-panel="advisory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 12h3v8h6v-6h2v6h6v-8h3L12 2z"/></svg>
+        Advisory
+      </button>
+      <button class="mobile-nav__item" data-panel="gps">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        GPS
+      </button>
+      <button class="mobile-nav__item" data-panel="export">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="dashboard-main">
+
+      <!-- ═══ PANEL: Scan ═══ -->
+      <div class="panel panel--active" id="panel-scan">
+        <h2 class="panel__title">Soil Scanner</h2>
+        <p class="panel__subtitle">Point your device at the soil and initiate a scan</p>
+
+        <div class="scan-area">
+          <div class="scan-btn-wrap scan-btn-wrap--idle" id="scan-btn-wrap">
+            <div class="scan-ring"></div>
+            <button class="scan-btn" id="scan-btn" aria-label="Start scan">
+              <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M5 20 Q10 10, 15 20 Q20 30, 25 20 Q30 10, 35 20"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="progress-steps hidden" id="progress-steps">
+            <span class="progress-step" data-step="0">Capturing Spectrum</span>
+            <span class="progress-line"></span>
+            <span class="progress-step" data-step="1">Processing</span>
+            <span class="progress-line"></span>
+            <span class="progress-step" data-step="2">Analysing Nutrients</span>
+            <span class="progress-line"></span>
+            <span class="progress-step" data-step="3">Complete</span>
+          </div>
+        </div>
+
+        <div class="scan-error" id="scan-error">Failed to complete scan. Check that the backend is running on localhost:8000.</div>
+
+        <div class="card spectral-card" id="spectral-card">
+          <h3 class="card__heading">Spectral Signature</h3>
+          <canvas id="spectral-chart"></canvas>
+          <div class="empty-state" id="spectral-empty">Spectral data will appear after your first scan</div>
+        </div>
+
+        <div class="metrics-grid" id="metrics-grid">
+          <div class="metric-card" id="metric-N">
+            <div class="metric-card__label">Nitrogen</div>
+            <div class="metric-card__value" id="val-N">&mdash;</div>
+            <span class="chip" id="chip-N">&mdash;</span>
+            <div class="metric-card__desc">% of dry weight</div>
+          </div>
+          <div class="metric-card" id="metric-P">
+            <div class="metric-card__label">Phosphorus</div>
+            <div class="metric-card__value" id="val-P">&mdash;</div>
+            <span class="chip" id="chip-P">&mdash;</span>
+            <div class="metric-card__desc">mg/kg</div>
+          </div>
+          <div class="metric-card" id="metric-K">
+            <div class="metric-card__label">Potassium</div>
+            <div class="metric-card__value" id="val-K">&mdash;</div>
+            <span class="chip" id="chip-K">&mdash;</span>
+            <div class="metric-card__desc">mg/kg</div>
+          </div>
+          <div class="metric-card" id="metric-OC">
+            <div class="metric-card__label">Organic Carbon</div>
+            <div class="metric-card__value" id="val-OC">&mdash;</div>
+            <span class="chip" id="chip-OC">&mdash;</span>
+            <div class="metric-card__desc">% of organic matter</div>
+          </div>
+        </div>
+
+        <div class="health-gauge" id="health-gauge">
+          <svg class="health-gauge__svg" viewBox="0 0 160 160" id="gauge-svg">
+            <circle cx="80" cy="80" r="70" fill="none" stroke="#9DC08B" stroke-width="10" opacity="0.2"/>
+            <circle cx="80" cy="80" r="70" fill="none" stroke="#9DC08B" stroke-width="10" id="gauge-arc"
+              stroke-dasharray="440" stroke-dashoffset="440" stroke-linecap="round" transform="rotate(-90 80 80)"/>
+            <text x="80" y="80" text-anchor="middle" dominant-baseline="central"
+              font-family="'Chivo Mono', monospace" font-size="32" font-weight="500" fill="#40513B" id="gauge-text">&mdash;</text>
+          </svg>
+          <span class="health-gauge__label">Soil Health Score</span>
+        </div>
+      </div>
+
+      <!-- ═══ PANEL: History ═══ -->
+      <div class="panel" id="panel-history">
+        <h2 class="panel__title">Scan History</h2>
+        <p class="panel__subtitle">Track nutrient trends over time</p>
+
+        <div class="card trend-chart-card" id="trend-chart-card">
+          <h3 class="card__heading">Nutrient Trends</h3>
+          <canvas id="trend-chart"></canvas>
+          <div class="empty-state" id="trend-empty">Run your first scan to see nutrient trends</div>
+        </div>
+
+        <div class="card">
+          <h3 class="card__heading">Scan Log</h3>
+          <div class="empty-state" id="history-empty">No scans yet. Run your first scan to see history.</div>
+          <div class="history-table-wrap">
+            <table class="history-table hidden" id="history-table">
+              <thead>
+                <tr>
+                  <th>Scan ID</th>
+                  <th>Timestamp</th>
+                  <th>N (%)</th>
+                  <th>P (mg/kg)</th>
+                  <th>K (mg/kg)</th>
+                  <th>OC (%)</th>
+                  <th>Health</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PANEL: Advisory ═══ -->
+      <div class="panel" id="panel-advisory">
+        <h2 class="panel__title">AI Advisory</h2>
+        <p class="panel__subtitle" style="font-family:var(--font-mono);font-size:12px">Powered by Groq &middot; llama-3.3-70b-versatile</p>
+
+        <div class="advisory-summary" id="advisory-summary">
+          <span class="advisory-summary__label" id="advisory-scan-label">Run a scan first</span>
+        </div>
+
+        <div id="advisory-content">
+          <div class="empty-state" id="advisory-empty">Run a scan to get AI-powered crop and fertilizer recommendations.</div>
+        </div>
+
+        <div id="advisory-skeleton" class="hidden" style="padding:24px 0">
+          <div class="skeleton skeleton--wide"></div>
+          <div class="skeleton skeleton--medium"></div>
+          <div class="skeleton skeleton--short"></div>
+        </div>
+
+        <div id="advisory-sections" class="advisory-sections hidden"></div>
+
+        <button class="btn btn--secondary hidden" id="regen-btn" style="margin-top:24px">Regenerate Advisory</button>
+      </div>
+
+      <!-- ═══ PANEL: GPS ═══ -->
+      <div class="panel" id="panel-gps">
+        <h2 class="panel__title">Field Map Simulation</h2>
+        <p class="panel__subtitle">Simulated scan locations in Punjab region</p>
+
+        <div class="card">
+          <div id="gps-placeholder">
+            <div class="gps-progress">
+              <p>Complete <strong id="gps-remaining">5</strong> more scans to unlock your field map</p>
+              <div class="gps-progress__bar">
+                <div class="gps-progress__fill" id="gps-fill" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="gps-map" class="hidden">
+            <div class="gps-grid" id="gps-grid"></div>
+            <p class="gps-caption" id="gps-caption"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PANEL: Export ═══ -->
+      <div class="panel" id="panel-export">
+        <h2 class="panel__title">Export Data</h2>
+        <p class="panel__subtitle">Download your scan history as CSV</p>
+
+        <div class="export-stats">
+          <div class="export-stat">
+            <span class="export-stat__value" id="export-total">0</span>
+            <span class="export-stat__label">Total scans</span>
+          </div>
+          <div class="export-stat">
+            <span class="export-stat__value" id="export-last">Never</span>
+            <span class="export-stat__label">Last export</span>
+          </div>
+          <div class="export-stat">
+            <span class="export-stat__value" id="export-range">&mdash;</span>
+            <span class="export-stat__label">Data range</span>
+          </div>
+        </div>
+
+        <button class="btn btn--primary" id="export-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download CSV
+        </button>
+      </div>
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
