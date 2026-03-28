@@ -2,3 +2,4 @@ __pycache__
 .venv
 testingsoildata.py
 .agent/*
+ml\mock_dataset.csv
